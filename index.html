@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fa Editor</title>
+  <link rel="icon" href="favicon.png" type="image/png">
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-family: sans-serif;
+    }
+
+    header {
+      background: #222;
+      color: #fff;
+      padding: 0.5em;
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+    }
+
+    header button {
+      background: #444;
+      color: #fff;
+      border: none;
+      padding: 0.5em 1em;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    header button:hover {
+      background: #666;
+    }
+
+    #container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #tabs {
+      display: flex;
+      background: #333;
+      color: #fff;
+      padding: 0.25em;
+      overflow-x: auto;
+    }
+
+    #tabs div {
+      padding: 0.5em 1em;
+      cursor: pointer;
+      border-radius: 4px 4px 0 0;
+      background: #444;
+      margin-right: 4px;
+      white-space: nowrap;
+    }
+
+    #tabs div.active {
+      background: #007acc;
+    }
+
+    #editor {
+      flex: 1;
+      min-height: 0;
+    }
+  </style>
+
+  <!-- Monaco Editor -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+  <!-- JSZip -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+</head>
+
+<body>
+  <header>
+    <img src="favicon.png" height="50" width="50" class="logo">
+    <button onclick="openProject()">📂 Open</button>
+    <button onclick="copyCode()">📋 Copy</button>
+    <button onclick="downloadFile()">💾 Download</button>
+  </header>
+
+  <div id="container">
+    <div id="tabs"></div>
+    <div id="editor"></div>
+  </div>
+
+  <script>
+    let editor;
+    let models = {}; // store opened files as {filename: model}
+    let currentFile = null;
+
+    // Load Monaco
+    require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
+    require(["vs/editor/editor.main"], function () {
+      editor = monaco.editor.create(document.getElementById('editor'), {
+        value: "<!--Fa editor-->",
+        language: "html",
+        theme: "vs-dark",
+        automaticLayout: true,
+        minimap: { enabled: true },
+      });
+    });
+
+    function getLanguageFromExtension(filename) {
+      if (filename.endsWith(".html")) return "html";
+      if (filename.endsWith(".css")) return "css";
+      if (filename.endsWith(".js")) return "javascript";
+      if (filename.endsWith(".txt")) return "plaintext";
+      return "plaintext";
+    }
+
+    function openProject() {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".zip,.html,.css,.js,.txt";
+      input.onchange = async e => {
+        const file = e.target.files[0];
+
+        // Handle single files
+        if (file.name.match(/\.(html|css|js|txt)$/)) {
+          const text = await file.text();
+          openFile(file.name, text);
+          return;
+        }
+
+        // Handle zip files
+        const data = await file.arrayBuffer();
+        JSZip.loadAsync(data).then(zip => {
+          zip.forEach((relPath, file) => {
+            if (file.name.match(/\.(html|css|js|txt)$/)) {
+              file.async("string").then(content => {
+                openFile(file.name, content);
+              });
+            }
+          });
+        });
+      };
+      input.click();
+    }
+
+    function openFile(name, content) {
+      const lang = getLanguageFromExtension(name);
+
+      // If file already open, just switch
+      if (models[name]) {
+        switchFile(name);
+        return;
+      }
+
+      // Create Monaco model
+      const model = monaco.editor.createModel(content, lang);
+      models[name] = model;
+      currentFile = name;
+
+      // Switch to this file
+      editor.setModel(model);
+      refreshTabs();
+    }
+
+    function switchFile(name) {
+      currentFile = name;
+      editor.setModel(models[name]);
+      refreshTabs();
+    }
+
+    function refreshTabs() {
+      const tabs = document.getElementById("tabs");
+      tabs.innerHTML = "";
+      Object.keys(models).forEach(filename => {
+        const tab = document.createElement("div");
+        tab.textContent = filename;
+        if (filename === currentFile) tab.classList.add("active");
+        tab.onclick = () => switchFile(filename);
+        tabs.appendChild(tab);
+      });
+    }
+
+    function copyCode() {
+      if (!currentFile) {
+        alert("No file open!");
+        return;
+      }
+      const code = editor.getValue();
+      navigator.clipboard.writeText(code).then(() => {
+        alert(currentFile + " copied to clipboard!");
+      });
+    }
+
+    function downloadFile() {
+      if (!currentFile) {
+        alert("No file open to download!");
+        return;
+      }
+      const code = editor.getValue();
+      const blob = new Blob([code], { type: "text/plain" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = currentFile; // keep original filename
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+  </script>
+</body>
+
+</html>
+
+
