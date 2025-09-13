@@ -22,6 +22,7 @@
       display: flex;
       align-items: center;
       gap: 0.5em;
+      flex-wrap: wrap;
     }
 
     header button {
@@ -59,22 +60,23 @@
       background: #444;
       margin-right: 4px;
       white-space: nowrap;
-    }
-
-    #tabs div {
       display: flex;
       align-items: center;
-      padding: 0.5em 0.75em;
-      cursor: pointer;
-      border-radius: 4px 4px 0 0;
-      background: #444;
-      margin-right: 4px;
-      white-space: nowrap;
     }
-
 
     #tabs div.active {
       background: #007acc;
+    }
+
+    #tabs .close {
+      margin-left: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      color: #ff6666;
+    }
+
+    #tabs .close:hover {
+      color: red;
     }
 
     #editor {
@@ -91,10 +93,14 @@
 
 <body>
   <header>
-    <img src="favicon.png" height="50" width="50" class="logo">
+    <img src="favicon.png" height="40" width="40" class="logo">
+    <button onclick="newFile()">📄 New File</button>
+    <button onclick="renameFile()">📝 Rename File</button>
     <button onclick="openProject()">📂 Open</button>
     <button onclick="copyCode()">📋 Copy</button>
-    <button onclick="downloadFile()">💾 Download</button>
+    <button onclick="downloadZip()">💾 Download ZIP</button>
+    <button onclick="toggleWordWrap()">↔️ Word Wrap</button>
+    <button onclick="formatDocument()">✨ Format</button>
   </header>
 
   <div id="container">
@@ -103,62 +109,11 @@
   </div>
 
   <script>
-    function refreshTabs() {
-  const tabs = document.getElementById("tabs");
-  tabs.innerHTML = "";
-  Object.keys(models).forEach(filename => {
-    const tab = document.createElement("div");
-    tab.classList.add("tab");
-
-    // Filename
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = filename;
-    nameSpan.onclick = () => switchFile(filename);
-
-    // Close button
-    const closeBtn = document.createElement("span");
-    closeBtn.textContent = " ×";
-    closeBtn.style.marginLeft = "6px";
-    closeBtn.style.cursor = "pointer";
-    closeBtn.onclick = (e) => {
-      e.stopPropagation(); // don’t switch file when closing
-      closeFile(filename);
-    };
-
-    if (filename === currentFile) tab.classList.add("active");
-
-    tab.appendChild(nameSpan);
-    tab.appendChild(closeBtn);
-    tabs.appendChild(tab);
-  });
-}
-
-function closeFile(name) {
-  if (!models[name]) return;
-
-  // Dispose Monaco model
-  models[name].dispose();
-  delete models[name];
-
-  if (currentFile === name) {
-    // pick another open file if available
-    const remaining = Object.keys(models);
-    if (remaining.length > 0) {
-      switchFile(remaining[0]);
-    } else {
-      editor.setValue("<!--Fa editor-->");
-      currentFile = null;
-    }
-  }
-
-  refreshTabs();
-}
-
     let editor;
     let models = {};
     let currentFile = null;
+    let wordWrapEnabled = false;
 
-    // Load Monaco
     require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
     require(["vs/editor/editor.main"], function () {
       editor = monaco.editor.create(document.getElementById('editor'), {
@@ -167,7 +122,9 @@ function closeFile(name) {
         theme: "vs-dark",
         automaticLayout: true,
         minimap: { enabled: true },
+        wordWrap: "off"
       });
+      restoreSession();
     });
 
     function getLanguageFromExtension(filename) {
@@ -176,6 +133,39 @@ function closeFile(name) {
       if (filename.endsWith(".js")) return "javascript";
       if (filename.endsWith(".txt")) return "plaintext";
       return "plaintext";
+    }
+
+    function newFile() {
+      let filename = prompt("Enter new file name (with extension .html, .css, .js, .txt):");
+      if (!filename) return;
+      if (models[filename]) {
+        alert("File already exists!");
+        return;
+      }
+      const lang = getLanguageFromExtension(filename);
+      const model = monaco.editor.createModel("", lang);
+      models[filename] = model;
+      models[filename].closed = false;
+      switchFile(filename);
+      saveSession();
+    }
+
+    function renameFile() {
+      if (!currentFile) {
+        alert("No file selected!");
+        return;
+      }
+      let newName = prompt("Enter new filename:", currentFile);
+      if (!newName) return;
+      if (models[newName]) {
+        alert("A file with that name already exists!");
+        return;
+      }
+      models[newName] = models[currentFile];
+      delete models[currentFile];
+      currentFile = newName;
+      refreshTabs();
+      saveSession();
     }
 
     function openProject() {
@@ -210,31 +200,65 @@ function closeFile(name) {
       const lang = getLanguageFromExtension(name);
 
       if (models[name]) {
+        models[name].closed = false;
         switchFile(name);
         return;
       }
 
       const model = monaco.editor.createModel(content, lang);
       models[name] = model;
-      currentFile = name;
-
-      editor.setModel(model);
-      refreshTabs();
+      models[name].closed = false;
+      switchFile(name);
+      saveSession();
     }
 
     function switchFile(name) {
       currentFile = name;
       editor.setModel(models[name]);
       refreshTabs();
+      saveSession();
+    }
+
+    function closeFile(name) {
+      if (!models[name]) return;
+      models[name].closed = true;
+
+      if (currentFile === name) {
+        const remaining = Object.keys(models).filter(f => !models[f].closed);
+        if (remaining.length > 0) {
+          switchFile(remaining[0]);
+        } else {
+          editor.setValue("<!--Fa editor-->");
+          editor.setModel(null);
+          currentFile = null;
+        }
+      }
+      refreshTabs();
+      saveSession();
     }
 
     function refreshTabs() {
       const tabs = document.getElementById("tabs");
       tabs.innerHTML = "";
       Object.keys(models).forEach(filename => {
+        if (models[filename].closed) return;
+
         const tab = document.createElement("div");
-        tab.textContent = filename;
         if (filename === currentFile) tab.classList.add("active");
+
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = filename;
+        tab.appendChild(nameSpan);
+
+        const closeBtn = document.createElement("span");
+        closeBtn.textContent = " ×";
+        closeBtn.classList.add("close");
+        closeBtn.onclick = (e) => {
+          e.stopPropagation();
+          closeFile(filename);
+        };
+        tab.appendChild(closeBtn);
+
         tab.onclick = () => switchFile(filename);
         tabs.appendChild(tab);
       });
@@ -251,35 +275,72 @@ function closeFile(name) {
       });
     }
 
-    // ✅ Download as ZIP (default for TV Bro)
-    async function downloadFile() {
-      if (!Object.keys(models).length) {
-        alert("No files open to download!");
-        return;
-      }
-
+    async function downloadZip() {
       const zip = new JSZip();
       Object.keys(models).forEach(name => {
         const code = models[name].getValue();
         zip.file(name, code);
       });
+      const blob = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "project.zip";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
 
-      const content = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(content);
+    function toggleWordWrap() {
+      wordWrapEnabled = !wordWrapEnabled;
+      editor.updateOptions({ wordWrap: wordWrapEnabled ? "on" : "off" });
+    }
+
+    function formatDocument() {
+      if (!currentFile) {
+        alert("No file open!");
+        return;
+      }
+      editor.getAction("editor.action.formatDocument").run();
+    }
+
+    function saveSession() {
+      const session = {
+        files: {},
+        currentFile
+      };
+      Object.keys(models).forEach(name => {
+        session.files[name] = {
+          content: models[name].getValue(),
+          closed: models[name].closed || false
+        };
+      });
+      localStorage.setItem("fa-editor-session", JSON.stringify(session));
+    }
+
+    function restoreSession() {
+      const sessionData = localStorage.getItem("fa-editor-session");
+      if (!sessionData) return;
 
       try {
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "project.zip";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        const session = JSON.parse(sessionData);
+        Object.keys(session.files).forEach(name => {
+          const file = session.files[name];
+          const model = monaco.editor.createModel(file.content, getLanguageFromExtension(name));
+          model.closed = file.closed;
+          models[name] = model;
+        });
+
+        if (session.currentFile && models[session.currentFile]) {
+          switchFile(session.currentFile);
+        } else {
+          const openFiles = Object.keys(models).filter(f => !models[f].closed);
+          if (openFiles.length > 0) switchFile(openFiles[0]);
+        }
+        refreshTabs();
       } catch (e) {
-        window.open(url, "_blank"); // fallback
+        console.error("Failed to restore session:", e);
       }
     }
   </script>
 </body>
-
 </html>
+
